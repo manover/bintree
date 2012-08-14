@@ -16,6 +16,7 @@ typedef unsigned short ushort;
 static PyTypeObject NodeType;
 
 #define SIGN(n) ((n >= 0) - (n < 0))
+#define MAX(a,b) (a > b ? a : b)
 
 typedef struct Node {
     PyObject_HEAD
@@ -25,46 +26,6 @@ typedef struct Node {
     struct Node *parent;
     int bf;
 } Node;
-
-static int Node_init(Node *self, PyObject *args)
-{
-    PyObject *key, *tmp;
-    Node *left = NULL;
-    Node *right = NULL;
-    Node *parent = NULL;
-
-    if (!PyArg_ParseTuple(args, "O|OOO", &key, &left, &right, &parent))
-        return -1;
-
-    if (!left)
-        left = (Node *)Py_None;
-    if (!right)
-        right = (Node *)Py_None;
-    if (!parent)
-        parent = (Node *)Py_None;
-
-    tmp = self->key;
-    Py_INCREF(key);
-    self->key = key;
-    Py_XDECREF(tmp);
-
-    tmp = (PyObject *)self->left;
-    Py_INCREF(left);
-    self->left = left;
-    Py_XDECREF(tmp);
-
-    tmp = (PyObject *)self->right;
-    Py_INCREF(right);
-    self->right = right;
-    Py_XDECREF(tmp);
-
-    tmp = (PyObject *)self->parent;
-    Py_INCREF(parent);
-    self->parent = parent;
-    Py_XDECREF(tmp);
-
-    return 0;
-}
 
 Node * Node__new(PyTypeObject *type,
                  PyObject *key,
@@ -244,6 +205,147 @@ PyObject * Node__insert(Node *self, PyObject *key)
     return Py_None;
 }
 
+static uint Node__height(Node *self)
+{
+    uint h_left=0, h_right=0;
+
+    if (self->left != (Node *)Py_None)
+        h_left = Node__height(self->left);
+
+    if (self->right != (Node *)Py_None)
+        h_right = Node__height(self->right);
+
+    return 1 + MAX(h_left, h_right);
+}
+
+static int Node__calc_bf(Node *self)
+{
+    uint h_left=0, h_right=0;
+
+    if (self->left != (Node *)Py_None)
+        h_left = Node__height(self->left);
+
+    if (self->right != (Node *)Py_None)
+        h_right = Node__height(self->right);
+
+    return h_left - h_right;
+}
+
+static Node * Node__from_list_raw(PyTypeObject *type, PyObject *l, Node *parent)
+{
+    PyObject *key, *left, *right;
+    Node *node, *tnode;
+
+    if (!PyArg_ParseTuple(l, "OOO", &key, &left, &right)) {
+        return NULL;
+    }
+
+    node = Node__new(type, key, (Node *)Py_None, (Node *)Py_None, parent);
+
+    if (left != Py_None) {
+        tnode = Node__from_list_raw(type, left, node);
+        if (tnode) {
+            Py_DECREF(node->left);
+            node->left = tnode;
+        }
+    }
+
+    if (right != Py_None) {
+        tnode = Node__from_list_raw(type, right, node);
+        if (tnode) {
+            Py_DECREF(node->right);
+            node->right = tnode;
+        }
+    }
+
+    node->bf = Node__calc_bf(node);
+    return node;
+}
+
+static void Node__move(Node *self, Node *node)
+{
+    node->key = self->key;
+    node->left = self->left;
+    node->right = self->right;
+    node->bf = self->bf;
+}
+
+#ifdef 0
+                    PARENT                  PARENT
+                    /    \                  /     \
+                RIGHT           =>      PIVOT
+                /   \                   /   \
+            PIVOT    A              LEFT    RIGHT
+            /   \                           /    \
+        LEFT     B                         B      A
+#endif
+
+static int Node__rotate_cw(Node *self)
+{
+    Node *pivot = self;
+    Node *right = self->parent;
+    Node *a;
+    int old_bf;
+
+    if (right == Py_None) {
+        PyErr_SetString(PyExc_RuntimeError, "can't rotate root node");
+        return -1;
+    } else if (right->right == self) {
+        PyErr_SetString(PyExc_RuntimeError, "can't rotate right subtree CW");
+        return -1;
+    }
+
+    // Save old subtree bf
+    old_bf = right->bf;
+    // Save a subtree
+    a = right->right;
+    // Move PIVOT into RIGHT
+    Node__move(self, right);
+
+}
+
+/********************* Export functions ********************************/
+
+static int Node_init(Node *self, PyObject *args)
+{
+    PyObject *key, *tmp;
+    Node *left = NULL;
+    Node *right = NULL;
+    Node *parent = NULL;
+
+    if (!PyArg_ParseTuple(args, "O|OOO", &key, &left, &right, &parent))
+        return -1;
+
+    if (!left)
+        left = (Node *)Py_None;
+    if (!right)
+        right = (Node *)Py_None;
+    if (!parent)
+        parent = (Node *)Py_None;
+
+    tmp = self->key;
+    Py_INCREF(key);
+    self->key = key;
+    Py_XDECREF(tmp);
+
+    tmp = (PyObject *)self->left;
+    Py_INCREF(left);
+    self->left = left;
+    Py_XDECREF(tmp);
+
+    tmp = (PyObject *)self->right;
+    Py_INCREF(right);
+    self->right = right;
+    Py_XDECREF(tmp);
+
+    tmp = (PyObject *)self->parent;
+    Py_INCREF(parent);
+    self->parent = parent;
+    Py_XDECREF(tmp);
+
+    return 0;
+}
+
 static Node * Node_search(Node *self, PyObject *args)
 {
     Node *n;
@@ -345,6 +447,64 @@ static PyObject * Node_from_list(PyTypeObject *type, PyObject *args)
     return (PyObject *)tree;
 }
 
+static PyObject * Node_from_list_raw(PyTypeObject *type, PyObject *args)
+{
+    PyObject *l, *parent=NULL;
+    Node *node;
+
+    if (!PyArg_ParseTuple(args, "O|O", &l, &parent))
+        return NULL;
+
+    if (!parent)
+        parent = Py_None;
+
+    node = Node__from_list_raw(type, l, (Node *)parent);
+
+    if (node)
+        return (PyObject *)node;
+    else {
+        Py_INCREF(Py_None);
+        return Py_None;
+    }
+}
+
+static PyObject * Node_to_list(Node *self)
+{
+    PyObject *left=Py_None, *right=Py_None;
+
+    if (self->left != (Node *)Py_None)
+        left = Node_to_list(self->left);
+    else
+        Py_INCREF(left);
+
+    if (self->right != (Node *)Py_None)
+        right = Node_to_list(self->right);
+    else
+        Py_INCREF(right);
+
+    return Py_BuildValue("ONN", self->key, left, right);
+}
+
+static PyObject * Node_rightmost(Node *self)
+{
+    PyObject * node;
+
+    node = (PyObject *)Node__rightmost(self);
+    Py_INCREF(node);
+
+    return node;
+}
+
+static PyObject * Node_height(Node *self)
+{
+    return Py_BuildValue("I", Node__height(self));
+}
+
+static PyObject * Node_calc_bf(Node *self)
+{
+    return Py_BuildValue("i", Node__calc_bf(self));
+}
+
 static PyMemberDef Node_members[] = {
     {"left", T_OBJECT_EX, offsetof(Node, left), 0, "left child"},
     {"right", T_OBJECT_EX, offsetof(Node, right), 0, "right child"},
@@ -394,7 +554,22 @@ static PyMethodDef Node_methods[] = {
      "Deletes a key from a tree"
     },
     {"from_list", (PyCFunction)Node_from_list, METH_VARARGS | METH_CLASS,
-     "Builds a list from a sequence"
+     "Builds a tree from a sequence"
+    },
+    {"from_list_raw", (PyCFunction)Node_from_list_raw, METH_VARARGS | METH_CLASS,
+     "Builds a tree from a tuple tree"
+    },
+    {"to_list", (PyCFunction)Node_to_list, METH_NOARGS,
+     "Builds a tuple tree"
+    },
+    {"rightmost", (PyCFunction)Node_rightmost, METH_NOARGS,
+     "Returns the rightmost node"
+    },
+    {"height", (PyCFunction)Node_height, METH_NOARGS,
+     "Returns tree height"
+    },
+    {"calc_bf", (PyCFunction)Node_calc_bf, METH_NOARGS,
+     "Calculates tree balance factor"
     },
     {NULL}  /* Sentinel */
 };
