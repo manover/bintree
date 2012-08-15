@@ -121,7 +121,7 @@ static void Node__rebalance(Node *self)
     return;
 }
 
-static void Node__update_bf_on_insert(Node *self, int delta, int dont_rebalance)
+static void Node__update_bf_on_increase(Node *self, int delta, int dont_rebalance)
 {
     int bf;
     Node *parent;
@@ -134,7 +134,7 @@ static void Node__update_bf_on_insert(Node *self, int delta, int dont_rebalance)
     else {
         parent = self->parent;
         if (parent != (Node *)Py_None)
-            Node__update_bf_on_insert(
+            Node__update_bf_on_increase(
                 parent,
                 Node__get_child_place(parent, self),
                 abs(bf) > 1 || dont_rebalance
@@ -144,7 +144,7 @@ static void Node__update_bf_on_insert(Node *self, int delta, int dont_rebalance)
         Node__rebalance(self);
 }
 
-static void Node__update_bf_on_delete(Node *self, int delta, int dont_rebalance)
+static void Node__update_bf_on_decrease(Node *self, int delta, int dont_rebalance)
 {
     int bf;
     Node *parent;
@@ -155,7 +155,7 @@ static void Node__update_bf_on_delete(Node *self, int delta, int dont_rebalance)
     if (bf == 0 || SIGN(bf) != SIGN(delta)) {
         parent = self->parent;
         if (parent != (Node *)Py_None)
-            Node__update_bf_on_delete(
+            Node__update_bf_on_decrease(
                 parent,
                 -Node__get_child_place(parent, self),
                 (abs(bf) > 1 || dont_rebalance)
@@ -197,7 +197,7 @@ PyObject * Node__insert(Node *self, PyObject *key)
         return NULL;
     } else {
         n = Node__new(self->ob_type, key, (Node *)Py_None, (Node *)Py_None, self);
-        Node__update_bf_on_insert(p, Node__connect_to_parent(n, p), 0);
+        Node__update_bf_on_increase(p, Node__connect_to_parent(n, p), 0);
         Py_DECREF(n);
     }
 
@@ -270,24 +270,24 @@ static void Node__move(Node *self, Node *node)
     node->bf = self->bf;
 }
 
-#ifdef 0
+#if 0
                     PARENT                  PARENT
                     /    \                  /     \
                 RIGHT           =>      PIVOT
                 /   \                   /   \
             PIVOT    A              LEFT    RIGHT
-            /   \                           /    \
-        LEFT     B                         B      A
+            /   \                          /    \
+        LEFT     B                        B      A
 #endif
 
 static int Node__rotate_cw(Node *self)
 {
-    Node *pivot = self;
     Node *right = self->parent;
-    Node *a;
-    int old_bf;
+    Node *a, *pivot, *parent;
+    PyObject *r_key;
+    int old_bf, delta;
 
-    if (right == Py_None) {
+    if (right == (Node *)Py_None) {
         PyErr_SetString(PyExc_RuntimeError, "can't rotate root node");
         return -1;
     } else if (right->right == self) {
@@ -297,13 +297,157 @@ static int Node__rotate_cw(Node *self)
 
     // Save old subtree bf
     old_bf = right->bf;
-    // Save a subtree
+    // Save the subtree
     a = right->right;
+    r_key = right->key;
     // Move PIVOT into RIGHT
     Node__move(self, right);
 
+    // Manually reconnect LEFT to the new PIVOT
+    if (self->left != (Node *)Py_None) {
+        // Disconnect old PIVOT from LEFT
+        Py_DECREF(self->left->parent);
+        // Reconnect LEFT to the new PIVOT, no incref needed
+        self->left->parent = right;
+    }
+    right->left = self->left;
+
+    // old PIVOT is the new RIGHT
+    self->key = r_key;
+    right->right = self;
+    // Move B to the left subtree
+    self->left = self->right;
+
+    // Reconnect A to the new RIGHT
+    if (a != (Node *)Py_None) {
+        a->parent = self;
+        Py_INCREF(a->parent);
+    }
+    self->right = a;
+
+    // Update bf's
+    // Redefine variables to catch up with the rotation changes
+    pivot = right;
+    right = self;
+    parent = pivot->parent;
+    // RIGHT's left subtree is 1 node shorter now (minus PIVOT)
+    right->bf = old_bf - 1;
+    if (pivot->bf > 0)
+        // If PIVOT bf > 0, PIVOT subtree height was represented by LEFT
+        // LEFT is no longer RIGHT's successor, so compensate for it
+        right->bf -= pivot->bf;
+    // PIVOT's right subtree is 1 node longer now (plus RIGHT)
+    pivot->bf -= 1;
+    if (right->bf < 0)
+        // If RIGHT bf < 0, RIGHT subtree height is represented by A
+        // A is now PIVOT's successor, update bf accordingly
+        pivot->bf += right->bf;
+
+    delta = abs(pivot->bf) - abs(old_bf);
+    if (parent != (Node *)Py_None) {
+        // When rotating, every height change in one node is accounted
+        // for double change in bf, e.g. when rotating tree with bf = 2 CW,
+        // the new bf will be 0, height will decrease by 1
+        if (delta > 0)
+            // Subtree height increased
+            Node__update_bf_on_increase(parent, delta/2 * Node__get_child_place(parent, pivot), 0);
+        else if (delta < 0)
+            // Subtree height decreased
+            Node__update_bf_on_decrease(parent, delta/2 * Node__get_child_place(parent, pivot), 0);
+    }
+
+    return 0;
 }
 
+#if 0
+        PARENT                    PARENT
+        /    \                   /     \
+             LEFT         =>          PIVOT
+            /    \                    /   \
+           A    PIVOT              LEFT    RIGHT
+               /     \            /    \
+              B     RIGHT        A      B
+#endif
+
+static int Node__rotate_ccw(Node *self)
+{
+    Node *left = self->parent;
+    Node *a, *pivot, *parent;
+    PyObject *l_key;
+    int old_bf, delta;
+
+    if (left == (Node *)Py_None) {
+        PyErr_SetString(PyExc_RuntimeError, "can't rotate root node");
+        return -1;
+    } else if (left->left == self) {
+        PyErr_SetString(PyExc_RuntimeError, "can't rotate left subtree CCW");
+        return -1;
+    }
+
+    // Save old subtree bf
+    old_bf = left->bf;
+    // Save the subtree
+    a = left->left;
+    l_key = left->key;
+    // Move PIVOT into LEFT
+    Node__move(self, left);
+
+    // Manually reconnect RIGHT to the new PIVOT
+    if (self->right != (Node *)Py_None) {
+        // Disconnect old PIVOT from RIGHT
+        Py_DECREF(self->right->parent);
+        // Reconnect RIGHT to the new PIVOT, no incref needed
+        self->right->parent = left;
+    }
+    left->right = self->right;
+
+    // old PIVOT is the new LEFT
+    self->key = l_key;
+    left->left = self;
+    // Move B to the right subtree
+    self->right = self->left;
+
+    // Reconnect A to the new LEFT
+    if (a != (Node *)Py_None) {
+        a->parent = self;
+        Py_INCREF(a->parent);
+    }
+    self->left = a;
+
+    // Update bf's
+    // Redefine variables to catch up with the rotation changes
+    pivot = left;
+    left = self;
+    parent = pivot->parent;
+    // LEFT's right subtree is 1 node shorter now (minus PIVOT)
+    left->bf = old_bf + 1;
+    if (pivot->bf < 0)
+        // If PIVOT bf < 0 PIVOT subtree height was represented by RIGHT
+        // RIGHT is no longer LEFT's successor, so compensate for it
+        pivot->bf += left->bf;
+
+    // PIVOT's left subtree is 1 node longer now (plus LEFT)
+    pivot->bf += 1;
+    if (left->bf > 0)
+        // If LEFT bf > 0 LEFT subtree height is represented by A
+        // A is now PIVOT's successor, update bf accordingly
+        pivot->bf += left->bf;
+
+    delta = abs(pivot->bf) - abs(old_bf);
+    if (parent != (Node *)Py_None) {
+        // When rotating, every height change in one node is accounted
+        // for double change in bf, e.g. when rotating tree with bf = 2 CW,
+        // the new bf will be 0, height will decrease by 1
+        if (delta > 1)
+            // Subtree height increased
+            Node__update_bf_on_increase(parent, delta/2 * Node__get_child_place(parent, pivot), 0);
+        else if (delta < -1)
+            // Subtree height decreased
+            Node__update_bf_on_decrease(parent, delta/2 * Node__get_child_place(parent, pivot), 0);
+    }
+
+    return 0;
+}
 /********************* Export functions ********************************/
 
 static int Node_init(Node *self, PyObject *args)
@@ -392,7 +536,7 @@ static PyObject * Node_delete(Node *self, PyObject *args)
         Py_INCREF(nkey);
 
         vargs = Py_BuildValue("(O)", nkey);
-        Node_delete(node->left, vargs);
+        Py_DECREF(Node_delete(node->left, vargs));
         Py_DECREF(vargs);
 
         node->key = nkey;
@@ -410,7 +554,7 @@ static PyObject * Node_delete(Node *self, PyObject *args)
             PyErr_SetString(PyExc_ValueError, "can't remove the last node");
 
         if (p != (Node *)Py_None)
-            Node__update_bf_on_delete(p, -bf, 0);
+            Node__update_bf_on_decrease(p, -bf, 0);
     }
 
     Py_INCREF(Py_None);
@@ -505,6 +649,56 @@ static PyObject * Node_calc_bf(Node *self)
     return Py_BuildValue("i", Node__calc_bf(self));
 }
 
+static PyObject * Node_rotate_cw(Node *self)
+{
+    if (!Node__rotate_cw(self)) {
+        Py_INCREF(Py_None);
+        return Py_None;
+    } else
+        return NULL;
+}
+
+static PyObject * Node_rotate_ccw(Node *self)
+{
+    if (!Node__rotate_ccw(self)) {
+        Py_INCREF(Py_None);
+        return Py_None;
+    } else
+        return NULL;
+}
+
+static PyObject * Node_traverse(Node *self, PyObject *args, PyObject *kwargs)
+{
+    PyObject *f, *nargs;
+
+    f = PyTuple_GetItem(args, 0);
+    if (!f) {
+        PyErr_SetString(PyExc_TypeError, "function takes at least 1 argument");
+        return NULL;
+    }
+
+    if (!PyCallable_Check(f)) {
+        PyErr_SetString(PyExc_TypeError, "first parameter must be a callable object");
+        return NULL;
+    }
+
+    nargs = PyTuple_GetSlice(args, 0, PyTuple_GET_SIZE(args));
+    Py_INCREF(self);
+    PyTuple_SET_ITEM(nargs, 0, (PyObject *)self);
+    return nargs;
+
+    Py_DECREF(PyObject_Call(f, nargs, kwargs));
+    Py_DECREF(nargs);
+
+    if (self->left != (Node *)Py_None)
+        Py_DECREF(Node_traverse(self->left, args, kwargs));
+    if (self->right != (Node *)Py_None)
+        Py_DECREF(Node_traverse(self->right, args, kwargs));
+
+    Py_INCREF(Py_None);
+    return Py_None;
+}
+
 static PyMemberDef Node_members[] = {
     {"left", T_OBJECT_EX, offsetof(Node, left), 0, "left child"},
     {"right", T_OBJECT_EX, offsetof(Node, right), 0, "right child"},
@@ -570,6 +764,15 @@ static PyMethodDef Node_methods[] = {
     },
     {"calc_bf", (PyCFunction)Node_calc_bf, METH_NOARGS,
      "Calculates tree balance factor"
+    },
+    {"rotate_cw", (PyCFunction)Node_rotate_cw, METH_NOARGS,
+     "Rotates a node clock-wise"
+    },
+    {"rotate_ccw", (PyCFunction)Node_rotate_ccw, METH_NOARGS,
+     "Rotates a node counter clock-wise"
+    },
+    {"traverse", (PyCFunction)Node_traverse, METH_KEYWORDS,
+     "Traverses a tree"
     },
     {NULL}  /* Sentinel */
 };
