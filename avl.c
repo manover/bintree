@@ -17,6 +17,8 @@ static PyTypeObject NodeType;
 
 #define SIGN(n) ((n >= 0) - (n < 0))
 #define MAX(a,b) (a > b ? a : b)
+#define NOT_NONE(n) ((PyObject *)n != Py_None)
+#define IS_NONE(n) ((PyObject *)n == Py_None)
 
 typedef struct Node {
     PyObject_HEAD
@@ -60,7 +62,7 @@ static Node * Node__search(Node *self, PyObject *key)
     Node *n = self;
     Node *last = NULL;
 
-    while (n != (Node *)Py_None) {
+    while (NOT_NONE(n)) {
         last = n;
 
         switch (PyObject_Compare(key, n->key)) {
@@ -71,12 +73,10 @@ static Node * Node__search(Node *self, PyObject *key)
                 n = n->right;
                 break;
             default:
-                Py_INCREF(n);
                 return n;
         }
     }
 
-    Py_INCREF(last);
     return last;
 }
 
@@ -133,7 +133,7 @@ static void Node__update_bf_on_increase(Node *self, int delta, int dont_rebalanc
         return;
     else {
         parent = self->parent;
-        if (parent != (Node *)Py_None)
+        if (NOT_NONE(parent))
             Node__update_bf_on_increase(
                 parent,
                 Node__get_child_place(parent, self),
@@ -154,7 +154,7 @@ static void Node__update_bf_on_decrease(Node *self, int delta, int dont_rebalanc
 
     if (bf == 0 || SIGN(bf) != SIGN(delta)) {
         parent = self->parent;
-        if (parent != (Node *)Py_None)
+        if (NOT_NONE(parent))
             Node__update_bf_on_decrease(
                 parent,
                 -Node__get_child_place(parent, self),
@@ -180,13 +180,13 @@ static void Node__disconnect(Node *self, Node *node)
 
 static Node * Node__rightmost(Node *self)
 {
-    if (self->right != (Node *)Py_None)
+    if (NOT_NONE(self->right))
         return Node__rightmost(self->right);
     else
         return self;
 }
 
-PyObject * Node__insert(Node *self, PyObject *key)
+static int Node__insert(Node *self, PyObject *key)
 {
     Node *p, *n;
 
@@ -194,25 +194,24 @@ PyObject * Node__insert(Node *self, PyObject *key)
 
     if (!PyObject_Compare(p->key, key)) {
         PyErr_SetString(PyExc_KeyError, "key already present");
-        return NULL;
+        return -1;
     } else {
         n = Node__new(self->ob_type, key, (Node *)Py_None, (Node *)Py_None, self);
         Node__update_bf_on_increase(p, Node__connect_to_parent(n, p), 0);
         Py_DECREF(n);
     }
 
-    Py_INCREF(Py_None);
-    return Py_None;
+    return 0;
 }
 
 static uint Node__height(Node *self)
 {
     uint h_left=0, h_right=0;
 
-    if (self->left != (Node *)Py_None)
+    if (NOT_NONE(self->left))
         h_left = Node__height(self->left);
 
-    if (self->right != (Node *)Py_None)
+    if (NOT_NONE(self->right))
         h_right = Node__height(self->right);
 
     return 1 + MAX(h_left, h_right);
@@ -222,10 +221,10 @@ static int Node__calc_bf(Node *self)
 {
     uint h_left=0, h_right=0;
 
-    if (self->left != (Node *)Py_None)
+    if (NOT_NONE(self->left))
         h_left = Node__height(self->left);
 
-    if (self->right != (Node *)Py_None)
+    if (NOT_NONE(self->right))
         h_right = Node__height(self->right);
 
     return h_left - h_right;
@@ -287,7 +286,7 @@ static int Node__rotate_cw(Node *self)
     PyObject *r_key;
     int old_bf, delta;
 
-    if (right == (Node *)Py_None) {
+    if (IS_NONE(right)) {
         PyErr_SetString(PyExc_RuntimeError, "can't rotate root node");
         return -1;
     } else if (right->right == self) {
@@ -304,7 +303,7 @@ static int Node__rotate_cw(Node *self)
     Node__move(self, right);
 
     // Manually reconnect LEFT to the new PIVOT
-    if (self->left != (Node *)Py_None) {
+    if (NOT_NONE(self->left)) {
         // Disconnect old PIVOT from LEFT
         Py_DECREF(self->left->parent);
         // Reconnect LEFT to the new PIVOT, no incref needed
@@ -319,7 +318,7 @@ static int Node__rotate_cw(Node *self)
     self->left = self->right;
 
     // Reconnect A to the new RIGHT
-    if (a != (Node *)Py_None) {
+    if (NOT_NONE(a)) {
         a->parent = self;
         Py_INCREF(a->parent);
     }
@@ -344,7 +343,7 @@ static int Node__rotate_cw(Node *self)
         pivot->bf += right->bf;
 
     delta = abs(pivot->bf) - abs(old_bf);
-    if (parent != (Node *)Py_None) {
+    if (NOT_NONE(parent)) {
         // When rotating, every height change in one node is accounted
         // for double change in bf, e.g. when rotating tree with bf = 2 CW,
         // the new bf will be 0, height will decrease by 1
@@ -376,7 +375,7 @@ static int Node__rotate_ccw(Node *self)
     PyObject *l_key;
     int old_bf, delta;
 
-    if (left == (Node *)Py_None) {
+    if (IS_NONE(left)) {
         PyErr_SetString(PyExc_RuntimeError, "can't rotate root node");
         return -1;
     } else if (left->left == self) {
@@ -393,7 +392,7 @@ static int Node__rotate_ccw(Node *self)
     Node__move(self, left);
 
     // Manually reconnect RIGHT to the new PIVOT
-    if (self->right != (Node *)Py_None) {
+    if (NOT_NONE(self->right)) {
         // Disconnect old PIVOT from RIGHT
         Py_DECREF(self->right->parent);
         // Reconnect RIGHT to the new PIVOT, no incref needed
@@ -408,7 +407,7 @@ static int Node__rotate_ccw(Node *self)
     self->right = self->left;
 
     // Reconnect A to the new LEFT
-    if (a != (Node *)Py_None) {
+    if (NOT_NONE(a)) {
         a->parent = self;
         Py_INCREF(a->parent);
     }
@@ -424,7 +423,7 @@ static int Node__rotate_ccw(Node *self)
     if (pivot->bf < 0)
         // If PIVOT bf < 0 PIVOT subtree height was represented by RIGHT
         // RIGHT is no longer LEFT's successor, so compensate for it
-        pivot->bf += left->bf;
+        left->bf -= pivot->bf;
 
     // PIVOT's left subtree is 1 node longer now (plus LEFT)
     pivot->bf += 1;
@@ -434,7 +433,7 @@ static int Node__rotate_ccw(Node *self)
         pivot->bf += left->bf;
 
     delta = abs(pivot->bf) - abs(old_bf);
-    if (parent != (Node *)Py_None) {
+    if (NOT_NONE(parent)) {
         // When rotating, every height change in one node is accounted
         // for double change in bf, e.g. when rotating tree with bf = 2 CW,
         // the new bf will be 0, height will decrease by 1
@@ -444,6 +443,45 @@ static int Node__rotate_ccw(Node *self)
         else if (delta < -1)
             // Subtree height decreased
             Node__update_bf_on_decrease(parent, delta/2 * Node__get_child_place(parent, pivot), 0);
+    }
+
+    return 0;
+}
+
+static int Node__delete(Node *self)
+{
+    Node *rmost, *p;
+    int bf = 0;
+    PyObject *rm_key;
+
+    if (NOT_NONE(self->left) && NOT_NONE(self->right)) {
+        // Both children exist
+        rmost = Node__rightmost(self->left);
+        rm_key = rmost->key;
+        Py_INCREF(rm_key);        
+        Node__delete(rmost);
+        Py_DECREF(self->key);
+        self->key = rmost->key;
+    } else {
+        p = self->parent;
+        
+        if (NOT_NONE(p))
+            bf = Node__get_child_place(p, self);
+
+        if (NOT_NONE(self->left)) // Only left child exists
+            Node__connect_to_parent(self->left, p);
+        else if (NOT_NONE(self->right)) // Only right child exists
+            Node__connect_to_parent(self->right, p);
+        else if (NOT_NONE(p)) // No children exist, parent is not None
+            Node__disconnect(p, self);
+        else {
+            // Parent is None
+            PyErr_SetString(PyExc_ValueError, "can't remove the last node");
+            return -1;
+        }
+
+        if (NOT_NONE(p))
+            Node__update_bf_on_decrease(p, -bf, 0);
     }
 
     return 0;
@@ -499,10 +537,10 @@ static Node * Node_search(Node *self, PyObject *args)
         return NULL;
 
     n = Node__search(self, key);
-    if (!PyObject_Compare(n->key, key))
+    if (!PyObject_Compare(n->key, key)) {
+        Py_INCREF(n);
         return n;
-    else {
-        Py_DECREF(n);
+    } else {
         PyErr_SetString(PyExc_KeyError, "key not found");
         return NULL;
     }
@@ -515,47 +553,24 @@ static PyObject * Node_insert(Node *self, PyObject *args)
     if (!PyArg_ParseTuple(args, "O", &key))
         return NULL;
 
-    return Node__insert(self, key);
+    if (Node__insert(self, key))
+        return NULL;
+    
+    Py_INCREF(Py_None);
+    return Py_None;
 }
 
 static PyObject * Node_delete(Node *self, PyObject *args)
 {
-    Node *node, *p;
-    PyObject *key, *nkey, *vargs;
-    int bf = 0;
+    Node *node;
 
-    if (!PyArg_ParseTuple(args, "O", &key))
+    node = (Node *)Node_search(self, args);
+    if (!node)
         return NULL;
-
-    node = Node_search(self, args);
-    p = node->parent;
-
-    if (node->left != (Node *)Py_None && node->right != (Node *)Py_None) {
-        // Both children exist
-        nkey = (Node__rightmost(node->left))->key;
-        Py_INCREF(nkey);
-
-        vargs = Py_BuildValue("(O)", nkey);
-        Py_DECREF(Node_delete(node->left, vargs));
-        Py_DECREF(vargs);
-
-        node->key = nkey;
-    } else {
-        if (p != (Node *)Py_None)
-            bf = Node__get_child_place(p, node);
-
-        if (node->left != (Node *)Py_None) // Only left child exists
-            Node__connect_to_parent(node->left, p);
-        else if (node->right != (Node *)Py_None) // Only right child exists
-            Node__connect_to_parent(node->right, p);
-        else if (p != (Node *)Py_None) // No children exist, parent is not None
-            Node__disconnect(p, node);
-        else // Parent is None
-            PyErr_SetString(PyExc_ValueError, "can't remove the last node");
-
-        if (p != (Node *)Py_None)
-            Node__update_bf_on_decrease(p, -bf, 0);
-    }
+    
+    Py_DECREF(node);
+    if (Node__delete(node))
+        return NULL;
 
     Py_INCREF(Py_None);
     return Py_None;
@@ -616,12 +631,12 @@ static PyObject * Node_to_list(Node *self)
 {
     PyObject *left=Py_None, *right=Py_None;
 
-    if (self->left != (Node *)Py_None)
+    if (NOT_NONE(self->left))
         left = Node_to_list(self->left);
     else
         Py_INCREF(left);
 
-    if (self->right != (Node *)Py_None)
+    if (NOT_NONE(self->right))
         right = Node_to_list(self->right);
     else
         Py_INCREF(right);
@@ -669,7 +684,7 @@ static PyObject * Node_rotate_ccw(Node *self)
 
 static PyObject * Node_traverse(Node *self, PyObject *args, PyObject *kwargs)
 {
-    PyObject *f, *nargs;
+    PyObject *f, *nargs, *it, *rc;
 
     f = PyTuple_GetItem(args, 0);
     if (!f) {
@@ -682,21 +697,31 @@ static PyObject * Node_traverse(Node *self, PyObject *args, PyObject *kwargs)
         return NULL;
     }
 
-    nargs = PyTuple_GetSlice(args, 0, PyTuple_GET_SIZE(args));
+    it = PyObject_GetIter(args);
+    nargs = PySequence_Tuple(it);
+    Py_DECREF(it);
+    
     Py_INCREF(self);
-    PyTuple_SET_ITEM(nargs, 0, (PyObject *)self);
-    return nargs;
+    if (PyTuple_SetItem(nargs, 0, (PyObject *)self))
+        goto err;
 
-    Py_DECREF(PyObject_Call(f, nargs, kwargs));
+    if (!(rc = PyObject_Call(f, nargs, kwargs)))
+        goto err;
+    
+    Py_DECREF(rc);
     Py_DECREF(nargs);
 
-    if (self->left != (Node *)Py_None)
+    if (NOT_NONE(self->left))
         Py_DECREF(Node_traverse(self->left, args, kwargs));
-    if (self->right != (Node *)Py_None)
+    if (NOT_NONE(self->right))
         Py_DECREF(Node_traverse(self->right, args, kwargs));
 
     Py_INCREF(Py_None);
     return Py_None;
+
+    err:
+        Py_DECREF(nargs);
+        return NULL;
 }
 
 static PyMemberDef Node_members[] = {

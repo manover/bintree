@@ -46,31 +46,38 @@ class TestCase(unittest.TestCase):
         tree.delete(12)
         self.assertEqual(tree.to_list(),
             [6, [4, [1, [0, None, None], [3, None, None]], None], [7, None, [9, None, None]]])
+        tree.traverse(self.check)
 
         tree.delete(7)
         self.assertEqual(tree.to_list(),
             [6, [4, [1, [0, None, None], [3, None, None]], None], [9, None, None]])
+        tree.traverse(self.check)
 
         tree.delete(1)
         self.assertEqual(tree.to_list(),
             [6, [4, [0, None, [3, None, None]], None], [9, None, None]])
+        tree.traverse(self.check)
 
         tree.delete(6)
         self.assertEqual(tree.to_list(),
             [4, [0, None, [3, None, None]], [9, None, None]])
+        tree.traverse(self.check)
 
         tree.delete(9)
         self.assertEqual(tree.to_list(),
             [4, [0, None, [3, None, None]], None])
+        tree.traverse(self.check)
         
         tree = Tree.from_list_raw([150, [130, None, None], [170, None, [190, None, [210, None, None]]]])
         tree.delete(170)
         self.assertEqual(tree.to_list(),
             [150, [130, None, None], [190, None, [210, None, None]]])
+        tree.traverse(self.check)
         
         tree.delete(210)
         self.assertEqual(tree.to_list(),
             [150, [130, None, None], [190, None, None]])
+        tree.traverse(self.check)
 
     def test_05_rightmost(self):
         tree = self.tree.root

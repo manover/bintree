@@ -1,9 +1,9 @@
-#!/usr/bin/env python
+#!/usr/bin/env python2.7
 
 import unittest
 import random
 
-from avl import *
+from avl import Node
 
 class TestCase(unittest.TestCase):
     LIST = (6, (4, (1, (0, None, None), (3, None, None)), None), (7, None, (9, None, (12, None, None))))
@@ -46,31 +46,47 @@ class TestCase(unittest.TestCase):
         tree.delete(12)
         self.assertEqual(tree.to_list(),
             (6, (4, (1, (0, None, None), (3, None, None)), None), (7, None, (9, None, None))))
+        tree.traverse(self.check)
 
         tree.delete(7)
         self.assertEqual(tree.to_list(),
             (6, (4, (1, (0, None, None), (3, None, None)), None), (9, None, None)))
+        tree.traverse(self.check)
 
         tree.delete(1)
         self.assertEqual(tree.to_list(),
             (6, (4, (0, None, (3, None, None)), None), (9, None, None)))
+        tree.traverse(self.check)
 
         tree.delete(6)
         self.assertEqual(tree.to_list(),
             (4, (0, None, (3, None, None)), (9, None, None)))
+        tree.traverse(self.check)
 
         tree.delete(9)
         self.assertEqual(tree.to_list(),
             (4, (0, None, (3, None, None)), None))
+        tree.traverse(self.check)
 
         tree = Node.from_list_raw((150, (130, None, None), (170, None, (190, None, (210, None, None)))))
         tree.delete(170)
         self.assertEqual(tree.to_list(),
             (150, (130, None, None), (190, None, (210, None, None))))
+        tree.traverse(self.check)
 
         tree.delete(210)
         self.assertEqual(tree.to_list(),
             (150, (130, None, None), (190, None, None)))
+        tree.traverse(self.check)
+        
+        tree.delete(150)
+        self.assertEqual(tree.to_list(),
+            (130, None, (190, None, None)))
+        tree.traverse(self.check)
+
+        #tree.delete(130)
+        #self.assertEqual(tree.to_list(),
+        #    (190, None, None))
 
     def test_05_rightmost(self):
         tree = self.tree
@@ -97,8 +113,8 @@ class TestCase(unittest.TestCase):
         )
         tree.traverse(self.check)
 
-        t1 = Tree.from_list_raw((32, (23, None, None), (48, None, (59, None, None))))
-        t1.root.right.rotate_ccw()
+        t1 = Node.from_list_raw((32, (23, None, None), (48, None, (59, None, None))))
+        t1.right.rotate_ccw()
         t1.traverse(self.check)
 
     def test_07_height(self):
@@ -141,8 +157,8 @@ class TestCase(unittest.TestCase):
 
     def test_10_invalid_rotation(self):
         tree = Node.from_list([100, 30, 20, 50])
-        self.assertRaises(RotateError, tree.search(20).rotate_ccw)
-        self.assertRaises(RotateError, tree.search(50).rotate_cw)
+        self.assertRaises(RuntimeError, tree.search(20).rotate_ccw)
+        self.assertRaises(RuntimeError, tree.search(50).rotate_cw)
 
     def test_11_random(self):
         l = [88, 69, 68, 83, 24, 37, 96, 38, 53, 31, 4, 82, 10, 77, 59, 79, 32, 65, 23, 48]
@@ -180,8 +196,6 @@ class TestCase(unittest.TestCase):
         t = BalancedTree.from_list_raw(sl)
         t.insert(60)
         t.traverse(self.check)
-
-import random
 
 if __name__ == "__main__":
     unittest.main()
