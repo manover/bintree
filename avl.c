@@ -186,6 +186,14 @@ static Node * Node__rightmost(Node *self)
         return self;
 }
 
+static Node * Node__leftmost(Node *self)
+{
+    if (NOT_NONE(self->left))
+        return Node__leftmost(self->left);
+    else
+        return self;
+}
+
 static int Node__insert(Node *self, PyObject *key)
 {
     Node *p, *n;
@@ -450,38 +458,44 @@ static int Node__rotate_ccw(Node *self)
 
 static int Node__delete(Node *self)
 {
-    Node *rmost, *p;
-    int bf = 0;
-    PyObject *rm_key;
+    Node *utmost, *p = self->parent;
+    int bf;
+    PyObject *ut_key;
 
-    if (NOT_NONE(self->left) && NOT_NONE(self->right)) {
-        // Both children exist
-        rmost = Node__rightmost(self->left);
-        rm_key = rmost->key;
-        Py_INCREF(rm_key);        
-        Node__delete(rmost);
-        Py_DECREF(self->key);
-        self->key = rmost->key;
-    } else {
-        p = self->parent;
-        
-        if (NOT_NONE(p))
-            bf = Node__get_child_place(p, self);
-
-        if (NOT_NONE(self->left)) // Only left child exists
-            Node__connect_to_parent(self->left, p);
-        else if (NOT_NONE(self->right)) // Only right child exists
-            Node__connect_to_parent(self->right, p);
-        else if (NOT_NONE(p)) // No children exist, parent is not None
-            Node__disconnect(p, self);
+    if ((NOT_NONE(self->left) && NOT_NONE(self->right)) || IS_NONE(p)) {
+        // Both children exist or root node
+        if (NOT_NONE(self->left))
+            // Left child present or both children present
+            utmost = Node__rightmost(self->left);
+        else if (NOT_NONE(self->right))
+            // Only right child present, root node
+            utmost = Node__leftmost(self->right);
         else {
-            // Parent is None
-            PyErr_SetString(PyExc_ValueError, "can't remove the last node");
+            // No children, root node
+            PyErr_SetString(PyExc_RuntimeError, "can't remove the last node");
             return -1;
         }
 
-        if (NOT_NONE(p))
-            Node__update_bf_on_decrease(p, -bf, 0);
+        ut_key = utmost->key;
+        Py_INCREF(ut_key);
+        Node__delete(utmost);
+        Py_DECREF(self->key);
+        self->key = ut_key;
+
+    } else {
+        // Non-root node with only one child
+        bf = Node__get_child_place(p, self);
+
+        if (NOT_NONE(self->left))
+            // Only left child exists
+            Node__connect_to_parent(self->left, p);
+        else if (NOT_NONE(self->right))
+            // Only right child exists
+            Node__connect_to_parent(self->right, p);
+        else // No children exist, node is not root
+            Node__disconnect(p, self);
+
+        Node__update_bf_on_decrease(p, -bf, 0);
     }
 
     return 0;
@@ -555,7 +569,7 @@ static PyObject * Node_insert(Node *self, PyObject *args)
 
     if (Node__insert(self, key))
         return NULL;
-    
+
     Py_INCREF(Py_None);
     return Py_None;
 }
@@ -567,7 +581,7 @@ static PyObject * Node_delete(Node *self, PyObject *args)
     node = (Node *)Node_search(self, args);
     if (!node)
         return NULL;
-    
+
     Py_DECREF(node);
     if (Node__delete(node))
         return NULL;
@@ -700,14 +714,14 @@ static PyObject * Node_traverse(Node *self, PyObject *args, PyObject *kwargs)
     it = PyObject_GetIter(args);
     nargs = PySequence_Tuple(it);
     Py_DECREF(it);
-    
+
     Py_INCREF(self);
     if (PyTuple_SetItem(nargs, 0, (PyObject *)self))
         goto err;
 
     if (!(rc = PyObject_Call(f, nargs, kwargs)))
         goto err;
-    
+
     Py_DECREF(rc);
     Py_DECREF(nargs);
 
@@ -844,6 +858,58 @@ static PyTypeObject NodeType = {
     0,                         /* tp_new */
 };
 
+typedef struct Avl {
+    Node node;
+} Avl;
+
+static PyMethodDef Avl_methods[] = {
+    {NULL}  /* Sentinel */
+};
+
+static PyTypeObject AvlType = {
+    PyObject_HEAD_INIT(NULL)
+    0,                         /*ob_size*/
+    "avl.Avl",                 /*tp_name*/
+    sizeof(Avl),               /*tp_basicsize*/
+    0,                         /*tp_itemsize*/
+    0,                         /*tp_dealloc*/
+    0,                         /*tp_print*/
+    0,                         /*tp_getattr*/
+    0,                         /*tp_setattr*/
+    0,                         /*tp_compare*/
+    0,                         /*tp_repr*/
+    0,                         /*tp_as_number*/
+    0,                         /*tp_as_sequence*/
+    0,                         /*tp_as_mapping*/
+    0,                         /*tp_hash */
+    0,                         /*tp_call*/
+    0,                         /*tp_str*/
+    0,                         /*tp_getattro*/
+    0,                         /*tp_setattro*/
+    0,                         /*tp_as_buffer*/
+    Py_TPFLAGS_DEFAULT |
+        Py_TPFLAGS_BASETYPE,    /*tp_flags*/
+    "Avl object",              /* tp_doc */
+    0,	    	               /* tp_traverse */
+    0,	                       /* tp_clear */
+    0,	                       /* tp_richcompare */
+    0,	                       /* tp_weaklistoffset */
+    0,	                       /* tp_iter */
+    0,	                       /* tp_iternext */
+    Avl_methods,               /* tp_methods */
+    0,                         /* tp_members */
+    0,                         /* tp_getset */
+    0,                         /* tp_base */
+    0,                         /* tp_dict */
+    0,                         /* tp_descr_get */
+    0,                         /* tp_descr_set */
+    0,                         /* tp_dictoffset */
+    0,                         /* tp_init */
+    0,                         /* tp_alloc */
+    0,                         /* tp_new */
+};
+
+
 static PyMethodDef avl_methods[] = {
     {NULL}  /* Sentinel */
 };
@@ -857,9 +923,16 @@ initavl(void)
     if (PyType_Ready(&NodeType) < 0)
         return;
 
+    AvlType.tp_base = &NodeType;
+    if (PyType_Ready(&AvlType) < 0)
+        return;
+
     m = Py_InitModule3("avl", avl_methods,
                        "Avl module.");
 
     Py_INCREF(&NodeType);
     PyModule_AddObject(m, "Node", (PyObject *)&NodeType);
+
+    Py_INCREF(&AvlType);
+    PyModule_AddObject(m, "Avl", (PyObject *)&AvlType);
 }

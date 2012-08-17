@@ -53,6 +53,8 @@ class TestCase(unittest.TestCase):
             (6, (4, (1, (0, None, None), (3, None, None)), None), (9, None, None)))
         tree.traverse(self.check)
 
+        self.assertRaises(KeyError, tree.delete, 7)
+
         tree.delete(1)
         self.assertEqual(tree.to_list(),
             (6, (4, (0, None, (3, None, None)), None), (9, None, None)))
@@ -78,15 +80,18 @@ class TestCase(unittest.TestCase):
         self.assertEqual(tree.to_list(),
             (150, (130, None, None), (190, None, None)))
         tree.traverse(self.check)
-        
+
         tree.delete(150)
         self.assertEqual(tree.to_list(),
             (130, None, (190, None, None)))
         tree.traverse(self.check)
 
-        #tree.delete(130)
-        #self.assertEqual(tree.to_list(),
-        #    (190, None, None))
+        tree.delete(130)
+        self.assertEqual(tree.to_list(),
+            (190, None, None))
+        tree.traverse(self.check)
+
+        self.assertRaises(RuntimeError, tree.delete, 190)
 
     def test_05_rightmost(self):
         tree = self.tree
