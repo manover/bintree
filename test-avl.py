@@ -2,8 +2,9 @@
 
 import unittest
 import random
+import sys
 
-from avl import Node
+from avl import Node, Avl
 
 class TestCase(unittest.TestCase):
     LIST = (6, (4, (1, (0, None, None), (3, None, None)), None), (7, None, (9, None, (12, None, None))))
@@ -12,13 +13,17 @@ class TestCase(unittest.TestCase):
 
     def check(self, node):
         #print "%d: %d == %d" % (node.key, node.bf, node.calc_bf())
+        a_refcnt = 1
         self.assertEqual(node.bf, node.calc_bf())
         if node.left:
             self.assertIs(node, node.left.parent)
             self.assertGreater(node.key, node.left.key)
+            a_refcnt += 1
         if node.right:
             self.assertIs(node, node.right.parent)
             self.assertLess(node.key, node.right.key)
+            a_refcnt += 1
+        self.assertGreaterEqual(sys.getrefcount(node)-2, a_refcnt)
 
     def test_01_from_list(self):
         tree = self.tree
@@ -165,14 +170,15 @@ class TestCase(unittest.TestCase):
         self.assertRaises(RuntimeError, tree.search(20).rotate_ccw)
         self.assertRaises(RuntimeError, tree.search(50).rotate_cw)
 
-    def test_11_random(self):
+    def test_11_stress(self):
         l = [88, 69, 68, 83, 24, 37, 96, 38, 53, 31, 4, 82, 10, 77, 59, 79, 32, 65, 23, 48]
         #random.sample(xrange(100), 40)
-        tree = BalancedTree.from_list(l)
+        tree = Avl.from_list(l)
         tree.traverse(self.check)
         for i in l[:-1]:
-            #print "delete %d" % i
+            print "about to delete %d" % i,
             tree.delete(i)
+            print " ... deleted %d" % i
             tree.traverse(self.check)
         l2 = [25, 94, 43, 82, 11, 32, 14, 22, 74, 65, 5, 0, 2, 68, 89, 40, 19, 31, 8, 49, 96,
               58, 10, 1, 36, 60, 28, 41, 84, 30, 83, 12, 77, 86, 18, 45, 26, 44, 53, 66]
@@ -197,8 +203,8 @@ class TestCase(unittest.TestCase):
             self.assertIn(i, tree)
 
     def test_12_insert(self):
-        sl = [68, [58, [49, None, None], [65, None, None]], [74, None, None]]
-        t = BalancedTree.from_list_raw(sl)
+        sl = (68, (58, (49, None, None), (65, None, None)), (74, None, None))
+        t = Avl.from_list_raw(sl)
         t.insert(60)
         t.traverse(self.check)
 

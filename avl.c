@@ -22,6 +22,7 @@ static PyTypeObject NodeType;
 
 typedef struct Node {
     PyObject_HEAD
+    void (*rebalance)(struct Node *);
     struct Node *left;
     struct Node *right;
     PyObject *key;
@@ -51,6 +52,12 @@ Node * Node__new(PyTypeObject *type,
     Py_INCREF(parent);
 
     return node;
+}
+
+static void Node__rebalance(Node *self)
+{
+    if (self->rebalance)
+        self->rebalance(self);
 }
 
 static Node * Node__search(Node *self, PyObject *key)
@@ -116,11 +123,6 @@ static int Node__connect_to_parent(Node *self, Node *parent)
     return bf;
 }
 
-static void Node__rebalance(Node *self)
-{
-    return;
-}
-
 static void Node__update_bf_on_increase(Node *self, int delta, int dont_rebalance)
 {
     int bf;
@@ -129,9 +131,8 @@ static void Node__update_bf_on_increase(Node *self, int delta, int dont_rebalanc
     self->bf += delta;
     bf = self->bf;
 
-    if (bf == 0 || SIGN(bf) != SIGN(delta))
-        return;
-    else {
+    if (bf != 0 && SIGN(bf) == SIGN(delta)) {
+        // Subtree height increased
         parent = self->parent;
         if (NOT_NONE(parent))
             Node__update_bf_on_increase(
@@ -153,6 +154,7 @@ static void Node__update_bf_on_decrease(Node *self, int delta, int dont_rebalanc
     bf = self->bf;
 
     if (bf == 0 || SIGN(bf) != SIGN(delta)) {
+        // Subtree height decreased
         parent = self->parent;
         if (NOT_NONE(parent))
             Node__update_bf_on_decrease(
@@ -287,7 +289,7 @@ static void Node__move(Node *self, Node *node)
         LEFT     B                        B      A
 #endif
 
-static int Node__rotate_cw(Node *self)
+static Node * Node__rotate_cw(Node *self)
 {
     Node *right = self->parent;
     Node *a, *pivot, *parent;
@@ -296,10 +298,10 @@ static int Node__rotate_cw(Node *self)
 
     if (IS_NONE(right)) {
         PyErr_SetString(PyExc_RuntimeError, "can't rotate root node");
-        return -1;
+        return NULL;
     } else if (right->right == self) {
         PyErr_SetString(PyExc_RuntimeError, "can't rotate right subtree CW");
-        return -1;
+        return NULL;
     }
 
     // Save old subtree bf
@@ -317,11 +319,11 @@ static int Node__rotate_cw(Node *self)
         // Reconnect LEFT to the new PIVOT, no incref needed
         self->left->parent = right;
     }
-    right->left = self->left;
 
     // old PIVOT is the new RIGHT
     self->key = r_key;
     right->right = self;
+    Py_INCREF(self->parent);
     // Move B to the left subtree
     self->left = self->right;
 
@@ -363,7 +365,7 @@ static int Node__rotate_cw(Node *self)
             Node__update_bf_on_decrease(parent, delta/2 * Node__get_child_place(parent, pivot), 0);
     }
 
-    return 0;
+    return pivot;
 }
 
 #if 0
@@ -376,7 +378,7 @@ static int Node__rotate_cw(Node *self)
               B     RIGHT        A      B
 #endif
 
-static int Node__rotate_ccw(Node *self)
+static Node * Node__rotate_ccw(Node *self)
 {
     Node *left = self->parent;
     Node *a, *pivot, *parent;
@@ -385,10 +387,10 @@ static int Node__rotate_ccw(Node *self)
 
     if (IS_NONE(left)) {
         PyErr_SetString(PyExc_RuntimeError, "can't rotate root node");
-        return -1;
+        return NULL;
     } else if (left->left == self) {
         PyErr_SetString(PyExc_RuntimeError, "can't rotate left subtree CCW");
-        return -1;
+        return NULL;
     }
 
     // Save old subtree bf
@@ -406,11 +408,11 @@ static int Node__rotate_ccw(Node *self)
         // Reconnect RIGHT to the new PIVOT, no incref needed
         self->right->parent = left;
     }
-    left->right = self->right;
 
     // old PIVOT is the new LEFT
     self->key = l_key;
     left->left = self;
+    Py_INCREF(self->parent);
     // Move B to the right subtree
     self->right = self->left;
 
@@ -453,7 +455,7 @@ static int Node__rotate_ccw(Node *self)
             Node__update_bf_on_decrease(parent, delta/2 * Node__get_child_place(parent, pivot), 0);
     }
 
-    return 0;
+    return pivot;
 }
 
 static int Node__delete(Node *self)
@@ -658,6 +660,40 @@ static PyObject * Node_to_list(Node *self)
     return Py_BuildValue("ONN", self->key, left, right);
 }
 
+static PyObject * Node_to_dict(Node *self, PyObject *args)
+{
+    PyObject *vargs, *d = NULL;
+    
+    if (!PyArg_ParseTuple(args, "|O", &d))
+        return NULL;
+    
+    if (!d) {
+        if (!(d = PyDict_New()))
+            return NULL;
+    } else
+        Py_INCREF(d);
+
+    if (PyDict_SetItem(d, self->key, (PyObject *)self))
+        goto e2;
+    
+    vargs = Py_BuildValue("(O)", d);
+    if (NOT_NONE(self->left))
+        if (!Node_to_dict(self->left, vargs))
+            goto e1;
+    if (NOT_NONE(self->right))
+        if (!Node_to_dict(self->right, vargs))
+            goto e1;
+
+    Py_DECREF(vargs);
+    return d;
+    
+    e1:
+        Py_DECREF(vargs);
+    e2:
+        Py_DECREF(d);
+        return NULL;
+}
+
 static PyObject * Node_rightmost(Node *self)
 {
     PyObject * node;
@@ -680,7 +716,7 @@ static PyObject * Node_calc_bf(Node *self)
 
 static PyObject * Node_rotate_cw(Node *self)
 {
-    if (!Node__rotate_cw(self)) {
+    if (Node__rotate_cw(self)) {
         Py_INCREF(Py_None);
         return Py_None;
     } else
@@ -689,7 +725,7 @@ static PyObject * Node_rotate_cw(Node *self)
 
 static PyObject * Node_rotate_ccw(Node *self)
 {
-    if (!Node__rotate_ccw(self)) {
+    if (Node__rotate_ccw(self)) {
         Py_INCREF(Py_None);
         return Py_None;
     } else
@@ -795,6 +831,9 @@ static PyMethodDef Node_methods[] = {
     {"to_list", (PyCFunction)Node_to_list, METH_NOARGS,
      "Builds a tuple tree"
     },
+    {"to_dict", (PyCFunction)Node_to_dict, METH_VARARGS,
+     "Returns a dict of all tree elements"
+    },
     {"rightmost", (PyCFunction)Node_rightmost, METH_NOARGS,
      "Returns the rightmost node"
     },
@@ -866,6 +905,48 @@ static PyMethodDef Avl_methods[] = {
     {NULL}  /* Sentinel */
 };
 
+static void Avl__rebalance(Node *self)
+{
+    Node *new_pivot;
+    
+    if (self->bf == 2)
+        if (self->left->bf >= 0) {
+            // Left-left case
+            //printf("left-left\n");
+            Node__rotate_cw(self->left);
+        } else {
+            // Left-right case
+            //printf("left-right\n");
+            new_pivot = Node__rotate_ccw(self->left->right);
+            Node__rotate_cw(new_pivot);
+        }
+    else if (self->bf == -2) 
+        if (self->right->bf <= 0) {
+            // Right-right case
+            //printf("right-right\n");
+            Node__rotate_ccw(self->right);
+        } else {
+            // Right-left case
+            //printf("right-left\n");
+            new_pivot = Node__rotate_cw(self->right->left);
+            Node__rotate_ccw(new_pivot);
+        }
+    else
+        PyErr_SetString(PyExc_RuntimeError, "Unable to balance node");
+}
+
+static PyObject * Avl_new(PyTypeObject *type, PyObject *args, PyObject *kwds)
+{
+    Node *self;
+    
+    self = (Node *)type->tp_alloc(type, 0);
+    if (self)
+        self->rebalance = Avl__rebalance;
+        
+    return (PyObject *)self;
+}
+
+
 static PyTypeObject AvlType = {
     PyObject_HEAD_INIT(NULL)
     0,                         /*ob_size*/
@@ -906,7 +987,7 @@ static PyTypeObject AvlType = {
     0,                         /* tp_dictoffset */
     0,                         /* tp_init */
     0,                         /* tp_alloc */
-    0,                         /* tp_new */
+    Avl_new,                   /* tp_new */
 };
 
 
