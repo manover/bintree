@@ -460,9 +460,9 @@ static Node * Node__rotate_ccw(Node *self)
 
 static int Node__delete(Node *self)
 {
-    Node *utmost, *p = self->parent;
+    Node *utmost, *n_self, *p = self->parent;
     int bf;
-    PyObject *ut_key;
+    PyObject *ut_key, *s_key;
 
     if ((NOT_NONE(self->left) && NOT_NONE(self->right)) || IS_NONE(p)) {
         // Both children exist or root node
@@ -479,11 +479,14 @@ static int Node__delete(Node *self)
         }
 
         ut_key = utmost->key;
+        //printf("ut_key = %li\n", PyInt_AS_LONG(ut_key));
+        s_key = self->key;
         Py_INCREF(ut_key);
         Node__delete(utmost);
-        Py_DECREF(self->key);
-        self->key = ut_key;
-
+        
+        n_self = Node__search(self, s_key);
+        Py_DECREF(n_self->key);
+        n_self->key = ut_key;
     } else {
         // Non-root node with only one child
         bf = Node__get_child_place(p, self);
@@ -761,10 +764,20 @@ static PyObject * Node_traverse(Node *self, PyObject *args, PyObject *kwargs)
     Py_DECREF(rc);
     Py_DECREF(nargs);
 
-    if (NOT_NONE(self->left))
-        Py_DECREF(Node_traverse(self->left, args, kwargs));
-    if (NOT_NONE(self->right))
-        Py_DECREF(Node_traverse(self->right, args, kwargs));
+    if (NOT_NONE(self->left)) {
+        rc = Node_traverse(self->left, args, kwargs);
+        if (rc)
+            Py_DECREF(rc);
+        else
+            return NULL;
+    }
+    if (NOT_NONE(self->right)) {
+        rc = Node_traverse(self->right, args, kwargs);
+        if (rc)
+            Py_DECREF(rc);
+        else
+            return NULL;
+    }
 
     Py_INCREF(Py_None);
     return Py_None;
@@ -801,6 +814,14 @@ static PyObject * Node_Repr(PyObject *o)
     Py_DECREF(r_right);
 
     return s;
+}
+
+static int Node_Contains(Node *self, PyObject *key)
+{
+    Node *s;
+    
+    s = Node__search(self, key);    
+    return !PyObject_Compare(key, s->key);
 }
 
 static void Node_dealloc(Node *self)
@@ -855,6 +876,19 @@ static PyMethodDef Node_methods[] = {
     {NULL}  /* Sentinel */
 };
 
+static PySequenceMethods Node_as_sequence = {
+    0,                          /* sq_length */
+    0,                          /* sq_concat */
+    0,                          /* sq_repeat */
+    0,                          /* sq_item */
+    0,                          /* sq_slice */
+    0,                          /* sq_ass_item */
+    0,                          /* sq_ass_slice */
+    (objobjproc)Node_Contains,  /* sq_contains */
+    0,                          /* sq_inplace_concat */
+    0,                          /* sq_inplace_repeat */
+};
+
 static PyTypeObject NodeType = {
     PyObject_HEAD_INIT(NULL)
     0,                         /*ob_size*/
@@ -868,7 +902,7 @@ static PyTypeObject NodeType = {
     0,                         /*tp_compare*/
     Node_Repr,                  /*tp_repr*/
     0,                         /*tp_as_number*/
-    0,                         /*tp_as_sequence*/
+    &Node_as_sequence,         /*tp_as_sequence*/
     0,                         /*tp_as_mapping*/
     0,                         /*tp_hash */
     0,                         /*tp_call*/
@@ -876,7 +910,8 @@ static PyTypeObject NodeType = {
     0,                         /*tp_getattro*/
     0,                         /*tp_setattro*/
     0,                         /*tp_as_buffer*/
-    Py_TPFLAGS_DEFAULT | Py_TPFLAGS_BASETYPE,        /*tp_flags*/
+    Py_TPFLAGS_DEFAULT | Py_TPFLAGS_BASETYPE |
+        Py_TPFLAGS_HAVE_SEQUENCE_IN, /*tp_flags*/
     "Node object",              /* tp_doc */
     0,	    	               /* tp_traverse */
     0,	                       /* tp_clear */
@@ -895,6 +930,16 @@ static PyTypeObject NodeType = {
     (initproc)Node_init,        /* tp_init */
     0,                         /* tp_alloc */
     0,                         /* tp_new */
+    
+    0,                         /*tp_free Low-level free-memory routine */
+    0,                         /* tp_is_gc For PyObject_IS_GC */
+    0,                         /* tp_bases */
+    0,                         /* tp_mro */
+    0,                         /* tp_cache */
+    0,                         /* tp_subclasses */
+    0,                         /* tp_weaklist */
+    0,                         /* tp_del */
+    
 };
 
 typedef struct Avl {

@@ -176,9 +176,9 @@ class TestCase(unittest.TestCase):
         tree = Avl.from_list(l)
         tree.traverse(self.check)
         for i in l[:-1]:
-            print "about to delete %d" % i,
+            #print "about to delete %d" % i,
             tree.delete(i)
-            print " ... deleted %d" % i
+            #print " ... deleted %d" % i
             tree.traverse(self.check)
         l2 = [25, 94, 43, 82, 11, 32, 14, 22, 74, 65, 5, 0, 2, 68, 89, 40, 19, 31, 8, 49, 96,
               58, 10, 1, 36, 60, 28, 41, 84, 30, 83, 12, 77, 86, 18, 45, 26, 44, 53, 66]
@@ -192,6 +192,7 @@ class TestCase(unittest.TestCase):
             #print "delete >> %d" % i
             del cl[cl.index(i)]
             tree.delete(i)
+            #print tree.to_list()
             tree.traverse(self.check)
             self.assertItemsEqual(tree.to_dict().keys(), cl)
         for i in l2[30:]:
